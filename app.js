@@ -119,6 +119,7 @@ function normalizeTrackRow(row) {
     loudness: +row.loudness,
     speechiness: +row.speechiness,
     tempo: +row.tempo,
+    explicit: row.explicit === "true" || row.explicit === "1" || row.explicit === 1,
     genre: row.track_genre
   };
 }
@@ -896,9 +897,9 @@ function drawFingerprint(host, row, width, height) {
       ].map(p => p.join(",")).join(" ");
     });
 
-  genreGroups.transition().duration(550)
+  genreGroups
     .attr("transform", d => `translate(${x(row[d])},${y(d) + y.bandwidth() / 2})`)
-    .on("end", function(d) {
+    .each(function(d) {
       const clamped = row[d] < xMin || row[d] > xMax;
       d3.select(this).select(".fp-clamp-arrow").attr("opacity", clamped ? 1 : 0);
     });
@@ -968,8 +969,6 @@ function drawSongScatter(host, genre, trait) {
   const margin = { top: 24, right: 72, bottom: 56, left: 70 };
   const svg = host.append("svg").attr("viewBox", [0, 0, width, height]).attr("width", "100%");
   const x = d3.scaleLinear().domain([0, 100]).range([margin.left, width - margin.right]);
-
-  // Fixed y domain from all genres, not just this genre's extent
   const globalExtent = d3.extent(allTracks, d => d[trait]);
   const y = d3.scaleLinear().domain(globalExtent).nice().range([height - margin.bottom, margin.top]);
   const radius = d3.scaleSqrt().domain([0, 100]).range([2, 9]);
@@ -978,6 +977,7 @@ function drawSongScatter(host, genre, trait) {
   svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x));
   svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(6));
   svg.append("text").attr("class", "axis-label").attr("x", width / 2).attr("y", height - 16).attr("text-anchor", "middle").attr("font-size", 12).attr("font-weight", 750).text("Spotify popularity");
+  svg.append("text").attr("class", "axis-label").attr("transform", `translate(18,${height / 2}) rotate(-90)`).attr("text-anchor", "middle").attr("font-size", 12).attr("font-weight", 750).text(`${featureByKey(trait).label} value`);
   svg.append("text").attr("class", "axis-label").attr("x", -height / 2).attr("y", 18).attr("transform", "rotate(-90)").attr("text-anchor", "middle").attr("font-size", 12).attr("font-weight", 750).text(featureByKey(trait).label);
 
   // Global mean line (all genres)
@@ -1572,62 +1572,82 @@ function renderTakeaways() {
   const gameScore1 = state.traitGame.score;
   const gameScore2 = state.proximityGame.score;
 
-  // ── Prose layout ──
-  const wrap = host.append("div").style("max-width", "720px").style("line-height", "1.75").style("font-size", "16px");
+  const cardRow = host.append("div")
+    .style("display", "grid")
+    .style("grid-template-columns", "repeat(auto-fit,minmax(170px,1fr))")
+    .style("gap", "10px")
+    .style("margin", "0 0 18px");
+
+  [
+    { label: "Genres", value: numGenres.toLocaleString() },
+    { label: "Tracks", value: numTracks.toLocaleString() },
+    { label: "Most distinct", value: titleCase(mostDistinctive) },
+    { label: "Most typical", value: titleCase(mostTypical) }
+  ].forEach(item => {
+    const card = cardRow.append("div")
+      .style("background", "var(--panel)")
+      .style("border", "1px solid var(--line)")
+      .style("border-radius", "8px")
+      .style("padding", "10px 12px");
+    card.append("div").style("font-size", "11px").style("color", "var(--muted)").style("font-weight", "800").style("text-transform", "uppercase").text(item.label);
+    card.append("div").style("font-size", "18px").style("font-weight", "800").style("color", "var(--ink)").text(item.value);
+  });
+
+  const wrap = host.append("div").style("max-width", "780px").style("line-height", "1.72").style("font-size", "16px");
 
   function section(title, body) {
     wrap.append("h3").style("font-size", "22px").style("margin", "40px 0 10px").style("color", "var(--ink)").text(title);
     wrap.append("p").style("color", "var(--muted)").style("margin", "0 0 0").html(body);
   }
 
-  section(
-    "Every genre is its own world.",
-    `There are <strong style="color:var(--ink)">${numGenres} genres</strong> in this dataset, and no two of them have the same audio fingerprint. 
-    The furthest apart are <strong style="color:var(--ink)">${titleCase(genreA)}</strong> and <strong style="color:var(--ink)">${titleCase(genreB)}</strong> — 
-    on the five traits measured here, they sit as far from each other as any two genres can. At the other extreme, 
-    <strong style="color:var(--ink)">${titleCase(closeA)}</strong> and <strong style="color:var(--ink)">${titleCase(closeB)}</strong> are practically neighbors — 
-    different names, but strikingly similar sound profiles when you measure them the same way.`
-  );
+  section("What the map says in plain English.",
+    `<strong style="color:var(--ink)">${titleCase(genreA)}</strong> and <strong style="color:var(--ink)">${titleCase(genreB)}</strong> are the most different pair in our five-trait space.
+    Meanwhile, <strong style="color:var(--ink)">${titleCase(closeA)}</strong> and <strong style="color:var(--ink)">${titleCase(closeB)}</strong> are almost neighbors.
+    Same catalog, wildly different distances.` );
 
-  section(
-    "The average is never the whole story.",
-    `Across all ${numGenres} genres there are roughly <strong style="color:var(--ink)">${numTracks.toLocaleString()} individual tracks</strong>, 
-    about <strong style="color:var(--ink)">${avgTracksPerGenre.toLocaleString()} per genre</strong> on average. 
-    Within any one genre, those songs don't all sound the same — they scatter. 
-    <strong style="color:var(--ink)">${titleCase(mostDiverse)}</strong> has some of the widest internal spread: 
-    songs inside it vary almost as much as the gap between two completely different genres. 
-    Meanwhile, <strong style="color:var(--ink)">${titleCase(leastDiverse)}</strong> sits at the tighter end — 
-    its tracks cluster more closely around a shared center of gravity.`
-  );
+  section("Inside a genre, songs still spread out.",
+    `On average there are about <strong style="color:var(--ink)">${avgTracksPerGenre.toLocaleString()} tracks per genre</strong>.
+    <strong style="color:var(--ink)">${titleCase(mostDiverse)}</strong> is the most internally varied (by energy spread), while
+    <strong style="color:var(--ink)">${titleCase(leastDiverse)}</strong> is tighter.
+    So labels help, but they definitely don’t tell the whole story.` );
 
-  section(
-    "Some genres have a clear identity. Others blend in.",
-    `About <strong style="color:var(--ink)">${stronglyCharacterised} out of ${numGenres} genres</strong> have at least one trait that pulls sharply away from the pack — 
-    something that makes them immediately recognisable on a fingerprint chart. The rest sit closer to the middle across all five dimensions. 
-    <strong style="color:var(--ink)">${titleCase(mostDistinctive)}</strong> is the most extreme outlier overall — 
-    its average profile is further from the global center than any other genre. 
-    <strong style="color:var(--ink)">${titleCase(mostTypical)}</strong>, by contrast, is the most "average" genre in the dataset: 
-    not particularly loud, fast, danceable, wordy, or intense — just middling across the board.`
-  );
+  section("Strong identities vs middle-of-the-pack.",
+    `<strong style="color:var(--ink)">${stronglyCharacterised}/${numGenres}</strong> genres have at least one trait that really sticks out.
+    <strong style="color:var(--ink)">${titleCase(mostDistinctive)}</strong> is the farthest from the global center;
+    <strong style="color:var(--ink)">${titleCase(mostTypical)}</strong> sits closest to it.` );
 
-  section(
-    "Patterns still exist underneath all the differences.",
-    `Even with this much variation, structure keeps showing up. Genres that tend to feel intense also tend to sound louder — 
-    that relationship holds across styles that have nothing else in common. 
-    Genres built heavily on words and rhythm tend to be less reliant on pure sonic force. 
-    These aren't rules — every genre has exceptions, and every song within a genre adds its own variation — 
-    but they're real tendencies that cross genre lines, visible whenever you look at enough music at once.`
-  );
+  section("Why this matters for listening.",
+    `The games are a quick proof: fingerprints are informative, not random.
+    You can hear one thing and still be surprised by where a track lands in feature space.
+    ${gameScore1 > 0 || gameScore2 > 0 ? `Current score: <strong style="color:var(--ink)">${gameScore1}</strong> (match game) and <strong style="color:var(--ink)">${gameScore2}</strong> (neighbor game).` : "Try both games and see if your ears match the chart."}` );
 
-  section(
-    "What the games were really testing.",
-    `Matching a fingerprint to a song, or picking the closest neighbor, trains the same underlying instinct: 
-    that audio fingerprints carry real information, even when your ears are unsure. 
-    Two songs can sound worlds apart and still live close together in trait space. 
-    Two songs that feel similar can sit far apart on the chart. 
-    Genre labels are useful shortcuts — but the actual shape of a song is always more specific, and more surprising, than the label suggests.
-    ${gameScore1 > 0 || gameScore2 > 0 ? `<br><br>You scored <strong style="color:var(--ink)">${gameScore1}</strong> on the fingerprint game and <strong style="color:var(--ink)">${gameScore2}</strong> on the neighbor game.` : ""}`
-  );
+  drawTakeawayDistanceChart(host.append("div"), { genreA, genreB, closeA, closeB, maxDist, minDist });
+  drawTakeawaySpreadChart(host.append("div"), withinSpread.slice(0, 10));
+}
+
+function drawTakeawayDistanceChart(host, info) {
+  const data = [
+    { pair: `${titleCase(info.genreA)} ↔ ${titleCase(info.genreB)}`, value: info.maxDist, type: "Farthest pair" },
+    { pair: `${titleCase(info.closeA)} ↔ ${titleCase(info.closeB)}`, value: info.minDist, type: "Closest pair" }
+  ];
+  const width = 920, height = 170, margin = { top: 24, right: 30, bottom: 32, left: 210 };
+  const svg = host.append("svg").attr("viewBox", [0, 0, width, height]).attr("width", "100%");
+  const x = d3.scaleLinear().domain([0, d3.max(data, d => d.value) * 1.1]).range([margin.left, width - margin.right]);
+  const y = d3.scaleBand().domain(data.map(d => d.type)).range([margin.top, height - margin.bottom]).padding(0.35);
+  svg.append("g").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5));
+  svg.selectAll("text.t").data(data).join("text").attr("x", margin.left - 10).attr("y", d => y(d.type) + y.bandwidth() / 2).attr("text-anchor", "end").attr("dy", "0.34em").attr("fill", "#c8cfda").text(d => d.type);
+  svg.selectAll("rect").data(data).join("rect").attr("x", margin.left).attr("y", d => y(d.type)).attr("height", y.bandwidth()).attr("width", d => x(d.value) - margin.left).attr("fill", d => d.type.includes("Farthest") ? "#ff4f7b" : "#1ed760").attr("rx", 6);
+  svg.selectAll("text.v").data(data).join("text").attr("x", d => x(d.value) + 8).attr("y", d => y(d.type) + y.bandwidth() / 2).attr("dy", "0.34em").attr("fill", "#f5f6fb").attr("font-size", 11).text(d => `${d.value.toFixed(2)} · ${d.pair}`);
+}
+
+function drawTakeawaySpreadChart(host, spreadTop) {
+  const width = 920, height = 300, margin = { top: 16, right: 24, bottom: 90, left: 58 };
+  const svg = host.append("svg").attr("viewBox", [0, 0, width, height]).attr("width", "100%");
+  const x = d3.scaleBand().domain(spreadTop.map(d => d.genre)).range([margin.left, width - margin.right]).padding(0.25);
+  const y = d3.scaleLinear().domain([0, d3.max(spreadTop, d => d.spread) * 1.1]).nice().range([height - margin.bottom, margin.top]);
+  svg.append("g").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).tickFormat(d => titleCase(d))).selectAll("text").attr("transform", "rotate(-30)").style("text-anchor", "end");
+  svg.append("g").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+  svg.selectAll("rect").data(spreadTop).join("rect").attr("x", d => x(d.genre)).attr("y", d => y(d.spread)).attr("width", x.bandwidth()).attr("height", d => y(0) - y(d.spread)).attr("fill", "#6d8dff").attr("rx", 5);
 }
 
 function drawBubbleMap(host, data, trait) {
@@ -1931,14 +1951,14 @@ function answerProximityRound(round, choice) {
 
 function representativeSongs(genre, trait, count) {
   return getGenreTracks(genre)
-    .filter(d => Number.isFinite(d[trait]))
+    .filter(d => Number.isFinite(d[trait]) && !d.explicit)
     .sort((a, b) => d3.descending(a[trait], b[trait]) || d3.descending(a.popularity, b.popularity))
     .slice(0, count);
 }
 
 function topPopularTracks(genre, count) {
   return getGenreTracks(genre)
-    .filter(d => d.track_id && Number.isFinite(d.popularity))
+    .filter(d => d.track_id && Number.isFinite(d.popularity) && !d.explicit)
     .sort((a, b) => d3.descending(a.popularity, b.popularity))
     .slice(0, count);
 }
